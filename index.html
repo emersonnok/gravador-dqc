@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravador DQC</title>
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --txt:#f2f2f2; --sub:#a5abb5; --ok:#2fbf71; --rec:#e5484d; --warn:#f5a524; --btn:#3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--txt); font-family:system-ui,"Segoe UI",Roboto,sans-serif; padding:20px; }
+  .card { background:var(--card); border-radius:16px; padding:32px; max-width:520px; width:100%; text-align:center; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  .sub { color:var(--sub); font-size:15px; line-height:1.5; margin:8px 0 20px; }
+  input[type=text] { width:100%; font-size:20px; padding:14px; border-radius:10px; border:1px solid #3a3f49; background:#14161a; color:var(--txt); text-align:center; }
+  button { font-size:20px; font-weight:600; padding:16px 24px; border:0; border-radius:12px; background:var(--btn); color:#fff; cursor:pointer; width:100%; margin-top:16px; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.sec { background:#2c313a; font-size:16px; }
+  .tela { display:none; }
+  .tela.ativa { display:block; }
+  .selo { display:inline-block; font-size:28px; font-weight:800; letter-spacing:1px; padding:14px 26px; border-radius:999px; margin:10px 0; }
+  .selo.espera { background:#2c313a; color:var(--warn); }
+  .selo.rec { background:var(--rec); color:#fff; animation:pisca 1.4s infinite; }
+  .selo.ok { background:var(--ok); color:#06240f; }
+  @keyframes pisca { 50% { opacity:.65; } }
+  .tempo { font-size:40px; font-variant-numeric:tabular-nums; margin:6px 0; }
+  .medidor { height:14px; background:#14161a; border-radius:8px; overflow:hidden; margin:16px 0 6px; }
+  .medidor > div { height:100%; width:0; background:var(--ok); transition:width .15s; }
+  .mini { font-size:13px; color:var(--sub); }
+  .aviso { background:#3a2c10; color:#ffd58a; border-radius:10px; padding:12px; font-size:15px; margin-top:16px; display:none; }
+  .aviso.ativa { display:block; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div class="tela ativa" id="t-carregando">
+    <h1>Gravador DQC</h1>
+    <p class="sub">Carregando...</p>
+  </div>
+
+  <div class="tela" id="t-erro">
+    <h1>Não deu para abrir</h1>
+    <p class="sub" id="erro-texto"></p>
+  </div>
+
+  <div class="tela" id="t-entrada">
+    <h1 id="titulo-sessao">Gravador DQC</h1>
+    <p class="sub">Esta página grava o seu microfone com qualidade alta para a edição do episódio. Use fone de ouvido e deixe esta aba aberta até o final.</p>
+    <input type="text" id="nome" placeholder="Seu nome" maxlength="60" autocomplete="off">
+    <button id="btn-entrar">Entrar e liberar o microfone</button>
+    <p class="mini" style="margin-top:14px">Quando o navegador perguntar, clique em Permitir.</p>
+  </div>
+
+  <div class="tela" id="t-ativa">
+    <h1 id="ola"></h1>
+    <div class="selo espera" id="selo">AGUARDANDO</div>
+    <div class="tempo" id="tempo" style="display:none">00:00</div>
+    <p class="sub" id="instrucao"></p>
+    <div class="medidor"><div id="barra"></div></div>
+    <p class="mini">Fale alguma coisa: a barra verde precisa se mexer.</p>
+    <p class="mini" id="mic-nome"></p>
+    <p class="mini" id="envio"></p>
+    <div class="aviso" id="aviso"></div>
+  </div>
+
+  <div class="tela" id="t-fim">
+    <h1>Tudo certo!</h1>
+    <div class="selo ok">ENVIADO</div>
+    <p class="sub">Seu áudio foi enviado. Já pode fechar esta aba.</p>
+    <button class="sec" id="btn-copia">Baixar uma cópia de segurança</button>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  'use strict';
+  var BALDE = 'gravador-dqc';
+  var $ = function (id) { return document.getElementById(id); };
+  function mostrar(id) {
+    var telas = document.querySelectorAll('.tela');
+    for (var i = 0; i < telas.length; i++) telas[i].classList.remove('ativa');
+    $(id).classList.add('ativa');
+  }
+  function falhar(texto) { $('erro-texto').textContent = texto; mostrar('t-erro'); }
+  function espera(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function avisar(texto) {
+    var a = $('aviso');
+    if (texto) { a.textContent = texto; a.classList.add('ativa'); } else { a.classList.remove('ativa'); }
+  }
+
+  var cfg = window.GRAVADOR_CONFIG || {};
+  if (!cfg.supabaseUrl || cfg.supabaseUrl.indexOf('COLE_AQUI') === 0 || !window.supabase) {
+    falhar('O gravador ainda não foi configurado. Avise o Emerson.');
+    return;
+  }
+  var codigo = new URLSearchParams(location.search).get('s');
+  if (!codigo) { falhar('Este link está incompleto. Peça o link de novo para o Emerson.'); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    falhar('Este navegador não consegue gravar. Abra o link no Google Chrome, em um computador.');
+    return;
+  }
+
+  var sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false } });
+
+  var sessao = null, eu = null, stream = null;
+  var estadoLocal = 'entrada'; // entrada, aguardando, gravando, finalizando, concluido
+  var relogio = null, gravador = null, analisador = null, amostras = null;
+  var pico = 0, fila = [], copia = [], enviando = false, enviadas = 0, seq = 0, falhasSeguidas = 0;
+  var extensao = 'webm', tipoMime = 'audio/webm';
+  var desvio = 0, melhorIda = Infinity;
+  var inicioLocal = null, inicioServidorMs = null, inicioEnviado = false;
+  var gravacaoParou = false, erroAtual = null, ocupado = false, ultimoSinal = 0;
+
+  // Chama uma funcao do banco e aproveita a resposta para acertar o relogio
+  // com o servidor (cada computador tem um horario um pouco diferente).
+  async function chamar(nome, args) {
+    var t0 = Date.now();
+    var r = await sb.rpc(nome, args);
+    var t1 = Date.now();
+    if (r.error) throw r.error;
+    var d = r.data;
+    if (d && typeof d.agora_ms === 'number' && (t1 - t0) < melhorIda) {
+      melhorIda = t1 - t0;
+      desvio = d.agora_ms - (t0 + t1) / 2;
+    }
+    return d;
+  }
+
+  async function abrir() {
+    try {
+      var d = await chamar('gravador_ver_sessao', { p_codigo: codigo });
+      if (d.erro) { falhar('Não encontrei esta gravação. Confira o link com o Emerson.'); return; }
+      if (d.estado === 'encerrada') { falhar('Esta gravação já foi encerrada.'); return; }
+      sessao = d;
+      $('titulo-sessao').textContent = d.titulo;
+      try { $('nome').value = localStorage.getItem('gravador_nome') || ''; } catch (e) {}
+      mostrar('t-entrada');
+      if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        $('titulo-sessao').textContent = d.titulo + ' (use um computador)';
+      }
+    } catch (e) {
+      falhar('Sem conexão com o servidor. Verifique a internet e recarregue a página.');
+    }
+  }
+
+  async function entrar() {
+    var nome = $('nome').value.trim();
+    if (!nome) { $('nome').focus(); return; }
+    var botao = $('btn-entrar');
+    botao.disabled = true;
+    try { localStorage.setItem('gravador_nome', nome); } catch (e) {}
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          echoCancellation: !!sessao.cancelar_eco,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+    } catch (e) {
+      botao.disabled = false;
+      falhar('O microfone não foi liberado. Clique no cadeado ao lado do endereço da página, permita o microfone e recarregue.');
+      return;
+    }
+
+    var faixa = stream.getAudioTracks()[0];
+    faixa.addEventListener('ended', function () {
+      erroAtual = 'microfone desconectado';
+      avisar('O microfone foi desconectado. Reconecte e recarregue esta página.');
+    });
+
+    try {
+      var d = await chamar('gravador_entrar', {
+        p_codigo: codigo, p_nome: nome,
+        p_microfone: faixa.label || null, p_navegador: navigator.userAgent
+      });
+      if (d.erro) {
+        falhar(d.erro === 'sessao_encerrada' ? 'Esta gravação já foi encerrada.' : 'Não consegui entrar na gravação. Avise o Emerson.');
+        return;
+      }
+      eu = d;
+    } catch (e) {
+      botao.disabled = false;
+      falhar('Sem conexão com o servidor. Verifique a internet e recarregue a página.');
+      return;
+    }
+
+    $('ola').textContent = 'Olá, ' + nome + '!';
+    $('mic-nome').textContent = faixa.label ? 'Microfone: ' + faixa.label : '';
+    estadoLocal = 'aguardando';
+    pintar();
+    mostrar('t-ativa');
+    ligarMedidor();
+    ligarRelogio();
+    reagir(eu.estado);
+  }
+
+  function ligarMedidor() {
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      var ctx = new Ctx();
+      var fonte = ctx.createMediaStreamSource(stream);
+      analisador = ctx.createAnalyser();
+      analisador.fftSize = 2048;
+      amostras = new Float32Array(analisador.fftSize);
+      fonte.connect(analisador);
+    } catch (e) { analisador = null; }
+    setInterval(function () {
+      if (analisador) {
+        analisador.getFloatTimeDomainData(amostras);
+        var m = 0;
+        for (var i = 0; i < amostras.length; i++) { var v = Math.abs(amostras[i]); if (v > m) m = v; }
+        if (m > pico) pico = m;
+        $('barra').style.width = Math.min(100, Math.round(m * 160)) + '%';
+      }
+      if (estadoLocal === 'gravando' && inicioLocal) {
+        var s = Math.floor((Date.now() - inicioLocal) / 1000);
+        var hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+        $('tempo').textContent = (hh ? hh + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+      }
+    }, 200);
+  }
+
+  // O navegador desacelera os temporizadores de abas em segundo plano.
+  // Por isso o "relogio" desta pagina e um gravador auxiliar: ele dispara um
+  // evento a cada 2 segundos mesmo com a aba escondida. O audio dele e descartado.
+  function ligarRelogio() {
+    try {
+      relogio = new MediaRecorder(stream);
+      relogio.ondataavailable = function () { sinalizar(); };
+      relogio.start(2000);
+    } catch (e) { relogio = null; }
+    setInterval(sinalizar, 3000);
+  }
+
+  function statusAtual() {
+    if (erroAtual && estadoLocal !== 'concluido') return 'erro';
+    return { aguardando: 'pronto', gravando: 'gravando', finalizando: 'enviando', concluido: 'finalizado' }[estadoLocal] || 'pronto';
+  }
+
+  async function sinalizar(forcar) {
+    if (!eu || ocupado) return;
+    if (estadoLocal === 'concluido' && !forcar) return;
+    if (!forcar && Date.now() - ultimoSinal < 1500) return;
+    ocupado = true;
+    ultimoSinal = Date.now();
+    var mandaInicio = inicioServidorMs !== null && !inicioEnviado;
+    try {
+      var r = await chamar('gravador_sinal', {
+        p_id: eu.participante_id, p_chave: eu.chave, p_status: statusAtual(),
+        p_enviadas: enviadas, p_pendentes: fila.length, p_nivel: pico,
+        p_inicio_ms: mandaInicio ? inicioServidorMs : null, p_erro: erroAtual
+      });
+      pico = 0;
+      if (mandaInicio) inicioEnviado = true;
+      if (r && r.estado) reagir(r.estado);
+      return true;
+    } catch (e) {
+      // sem internet por um instante: tenta de novo no proximo ciclo
+      return false;
+    } finally {
+      ocupado = false;
+    }
+  }
+
+  function reagir(estadoSessao) {
+    if (estadoSessao === 'gravando' && estadoLocal === 'aguardando') iniciarGravacao();
+    else if (estadoSessao === 'encerrada' && estadoLocal === 'gravando') finalizar();
+    else if (estadoSessao === 'encerrada' && estadoLocal === 'aguardando') {
+      estadoLocal = 'concluido';
+      pararTudo();
+      falhar('Esta gravação foi encerrada antes de começar.');
+    }
+  }
+
+  function iniciarGravacao() {
+    var opcoes = { audioBitsPerSecond: 192000 };
+    if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) opcoes.mimeType = 'audio/webm;codecs=opus';
+    try {
+      gravador = new MediaRecorder(stream, opcoes);
+    } catch (e) {
+      erroAtual = 'nao iniciou: ' + e.message;
+      avisar('Não consegui iniciar a gravação neste navegador. Abra o link no Google Chrome.');
+      return;
+    }
+    tipoMime = (gravador.mimeType || 'audio/webm').split(';')[0];
+    extensao = tipoMime.indexOf('webm') >= 0 ? 'webm' : (tipoMime.indexOf('mp4') >= 0 ? 'm4a' : 'ogg');
+    gravador.onstart = function () {
+      inicioLocal = Date.now();
+      inicioServidorMs = inicioLocal + desvio;
+    };
+    gravador.ondataavailable = function (ev) {
+      if (ev.data && ev.data.size > 0) {
+        seq++;
+        copia.push(ev.data);
+        fila.push({ n: seq, blob: ev.data });
+        bombear();
+      }
+    };
+    gravador.onerror = function (ev) {
+      erroAtual = 'erro do gravador';
+      avisar('A gravação teve um problema. Avise o Emerson.');
+    };
+    gravador.onstop = function () { gravacaoParou = true; verificarFim(); };
+    estadoLocal = 'gravando';
+    gravador.start(5000);
+    pintar();
+  }
+
+  // Envia as partes em ordem, uma por vez, tentando de novo se a internet falhar.
+  async function bombear() {
+    if (enviando) return;
+    enviando = true;
+    while (fila.length) {
+      var p = fila[0];
+      var caminho = eu.sessao_id + '/' + eu.participante_id + '/' + String(p.n).padStart(6, '0') + '.' + extensao;
+      var erro = null;
+      try {
+        var r = await sb.storage.from(BALDE).upload(caminho, p.blob, { contentType: tipoMime, upsert: false });
+        erro = r.error;
+      } catch (e) { erro = e; }
+      var jaExiste = erro && (String(erro.statusCode) === '409' || /exist|duplicate/i.test(erro.message || ''));
+      if (!erro || jaExiste) {
+        fila.shift();
+        enviadas++;
+        falhasSeguidas = 0;
+        if (erroAtual && erroAtual.indexOf('envio') === 0) { erroAtual = null; avisar(null); }
+      } else {
+        falhasSeguidas++;
+        if (falhasSeguidas >= 4) {
+          erroAtual = 'envio falhando: ' + (erro.message || 'sem detalhe');
+          avisar('O envio está com dificuldade (internet?). Não feche esta aba, continuo tentando.');
+        }
+        await espera(Math.min(15000, 1000 * falhasSeguidas));
+      }
+      pintar();
+    }
+    enviando = false;
+    verificarFim();
+  }
+
+  function finalizar() {
+    if (estadoLocal !== 'gravando') return;
+    estadoLocal = 'finalizando';
+    pintar();
+    try { gravador.stop(); } catch (e) { gravacaoParou = true; verificarFim(); }
+  }
+
+  function pararTudo() {
+    try { if (relogio && relogio.state !== 'inactive') relogio.stop(); } catch (e) {}
+    try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+  }
+
+  async function verificarFim() {
+    if (estadoLocal !== 'finalizando' || !gravacaoParou || fila.length || enviando) return;
+    estadoLocal = 'concluido';
+    erroAtual = null;
+    for (var i = 0; i < 8; i++) {
+      while (ocupado) await espera(200);
+      if (await sinalizar(true)) break;
+      await espera(1000);
+    }
+    pararTudo();
+    mostrar('t-fim');
+  }
+
+  function pintar() {
+    var selo = $('selo'), inst = $('instrucao'), tempo = $('tempo');
+    if (estadoLocal === 'aguardando') {
+      selo.className = 'selo espera'; selo.textContent = 'AGUARDANDO';
+      tempo.style.display = 'none';
+      inst.textContent = 'Microfone liberado. A gravação começa sozinha quando o Emerson iniciar. Pode voltar para a aba do Restream e deixar esta aqui aberta.';
+    } else if (estadoLocal === 'gravando') {
+      selo.className = 'selo rec'; selo.textContent = 'GRAVANDO';
+      tempo.style.display = 'block';
+      inst.textContent = 'Não feche esta aba. Ela encerra sozinha no final.';
+    } else if (estadoLocal === 'finalizando') {
+      selo.className = 'selo espera'; selo.textContent = 'ENVIANDO';
+      tempo.style.display = 'none';
+      inst.textContent = 'Terminando de enviar o seu áudio. Aguarde só um pouco, sem fechar a aba.';
+    }
+    $('envio').textContent = seq ? ('Partes enviadas: ' + enviadas + ' de ' + seq) : '';
+  }
+
+  window.addEventListener('beforeunload', function (ev) {
+    if (estadoLocal === 'gravando' || estadoLocal === 'finalizando') {
+      ev.preventDefault();
+      ev.returnValue = '';
+    }
+  });
+
+  $('btn-entrar').addEventListener('click', entrar);
+  $('nome').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') entrar(); });
+  $('btn-copia').addEventListener('click', function () {
+    var blob = new Blob(copia, { type: tipoMime });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'meu-audio-dqc.' + extensao;
+    a.click();
+  });
+
+  abrir();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Painel do Gravador DQC</title>
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --linha:#2c313a; --txt:#f2f2f2; --sub:#a5abb5; --ok:#2fbf71; --rec:#e5484d; --warn:#f5a524; --btn:#3b82f6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,"Segoe UI",Roboto,sans-serif; }
+  .pagina { max-width:1100px; margin:0 auto; padding:24px; }
+  h1 { font-size:22px; margin:0 0 16px; }
+  h2 { font-size:18px; margin:0 0 12px; }
+  .card { background:var(--card); border-radius:14px; padding:20px; margin-bottom:18px; }
+  input[type=text], input[type=email], input[type=password] { font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid #3a3f49; background:#14161a; color:var(--txt); }
+  button { font-size:15px; font-weight:600; padding:10px 16px; border:0; border-radius:8px; background:var(--btn); color:#fff; cursor:pointer; }
+  button.sec { background:var(--linha); }
+  button.rec { background:var(--rec); }
+  button.ok { background:var(--ok); color:#06240f; }
+  button:disabled { opacity:.5; cursor:default; }
+  .linha { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .sub { color:var(--sub); font-size:14px; }
+  .oculto { display:none !important; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--linha); font-size:14px; vertical-align:middle; }
+  th { color:var(--sub); font-weight:500; }
+  .selo { display:inline-block; padding:4px 10px; border-radius:999px; font-size:13px; font-weight:700; }
+  .s-pronto { background:#3a2c10; color:#ffd58a; }
+  .s-gravando { background:var(--rec); color:#fff; }
+  .s-enviando { background:#17324f; color:#9ccbff; }
+  .s-finalizado { background:#113a22; color:#8be0ae; }
+  .s-erro, .s-sumiu { background:#4a1518; color:#ffb3b5; }
+  .medidor { width:110px; height:10px; background:#14161a; border-radius:6px; overflow:hidden; }
+  .medidor > div { height:100%; background:var(--ok); }
+  .sessoes button { margin:0 8px 8px 0; }
+  .sessoes button.atual { outline:2px solid var(--btn); }
+  .link { font-family:ui-monospace,Consolas,monospace; font-size:13px; background:#14161a; padding:8px 10px; border-radius:8px; word-break:break-all; flex:1; min-width:240px; }
+  .estado { font-size:16px; font-weight:700; }
+  .alerta { color:var(--warn); font-size:13px; }
+  .msg { margin-top:10px; font-size:14px; color:var(--warn); min-height:18px; }
+</style>
+</head>
+<body>
+<div class="pagina">
+  <h1>Painel do Gravador DQC</h1>
+
+  <div class="card" id="c-login">
+    <h2>Entrar</h2>
+    <div class="linha">
+      <input type="email" id="email" placeholder="E-mail" autocomplete="username">
+      <input type="password" id="senha" placeholder="Senha" autocomplete="current-password">
+      <button id="btn-login">Entrar</button>
+    </div>
+    <div class="msg" id="msg-login"></div>
+  </div>
+
+  <div id="area" class="oculto">
+    <div class="card">
+      <div class="linha" style="justify-content:space-between">
+        <h2 style="margin:0">Gravações</h2>
+        <button class="sec" id="btn-sair">Sair</button>
+      </div>
+      <div class="sessoes" id="lista-sessoes" style="margin-top:12px"></div>
+      <div class="linha" style="margin-top:8px">
+        <input type="text" id="novo-titulo" placeholder="Título da nova gravação" style="flex:1;min-width:220px" maxlength="80">
+        <label class="sub"><input type="checkbox" id="novo-eco"> Alguém vai gravar sem fone (liga o cancelamento de eco)</label>
+        <button id="btn-nova">Criar gravação</button>
+      </div>
+      <div class="msg" id="msg-geral"></div>
+    </div>
+
+    <div class="card oculto" id="c-sessao">
+      <div class="linha" style="justify-content:space-between">
+        <h2 style="margin:0" id="s-titulo"></h2>
+        <span class="estado" id="s-estado"></span>
+      </div>
+      <p class="sub" style="margin:12px 0 6px">Link para mandar aos convidados (e para você mesmo abrir em outra aba):</p>
+      <div class="linha">
+        <div class="link" id="s-link"></div>
+        <button class="sec" id="btn-copiar">Copiar link</button>
+      </div>
+      <div class="linha" style="margin-top:16px">
+        <button class="rec" id="btn-iniciar">Iniciar gravação de todos</button>
+        <button class="sec" id="btn-encerrar">Encerrar gravação</button>
+        <button class="sec" id="btn-apagar" style="margin-left:auto">Apagar gravação e áudios</button>
+      </div>
+      <div class="msg" id="msg-sessao"></div>
+
+      <table>
+        <thead>
+          <tr><th>Nome</th><th>Situação</th><th>Som</th><th>Partes</th><th>Início</th><th>Microfone</th><th></th></tr>
+        </thead>
+        <tbody id="corpo"></tbody>
+      </table>
+      <p class="sub" id="vazio">Ninguém entrou ainda.</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  'use strict';
+  var BALDE = 'gravador-dqc';
+  var $ = function (id) { return document.getElementById(id); };
+  function el(tag, props, filhos) {
+    var e = document.createElement(tag);
+    if (props) for (var k in props) { if (k === 'texto') e.textContent = props[k]; else if (k === 'classe') e.className = props[k]; else e[k] = props[k]; }
+    (filhos || []).forEach(function (f) { e.appendChild(f); });
+    return e;
+  }
+  function espera(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function limpo(t) { return String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'sem-nome'; }
+
+  var cfg = window.GRAVADOR_CONFIG || {};
+  if (!cfg.supabaseUrl || cfg.supabaseUrl.indexOf('COLE_AQUI') === 0 || !window.supabase) {
+    $('msg-login').textContent = 'Falta preencher o arquivo config.js com os dados do Supabase.';
+    $('btn-login').disabled = true;
+    return;
+  }
+  var sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+
+  var sessoes = [], atual = null, dados = null, ultimoSom = {}, baixando = {}, apagarArmado = false, ciclo = null;
+
+  // ---------- login ----------
+  async function conferirLogin() {
+    var r = await sb.auth.getSession();
+    if (!r.data.session) { $('c-login').classList.remove('oculto'); $('area').classList.add('oculto'); return; }
+    var adm = await sb.rpc('gravador_eh_admin');
+    if (adm.error || !adm.data) {
+      $('msg-login').textContent = 'Este usuário não tem permissão para o painel. Peça a liberação do seu e-mail na tabela gravador_admins.';
+      await sb.auth.signOut();
+      return;
+    }
+    $('c-login').classList.add('oculto');
+    $('area').classList.remove('oculto');
+    await carregarSessoes();
+    if (!ciclo) ciclo = setInterval(atualizar, 2000);
+  }
+
+  $('btn-login').addEventListener('click', async function () {
+    $('msg-login').textContent = '';
+    var r = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('senha').value });
+    if (r.error) { $('msg-login').textContent = 'E-mail ou senha incorretos.'; return; }
+    $('senha').value = '';
+    conferirLogin();
+  });
+  $('senha').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') $('btn-login').click(); });
+  $('btn-sair').addEventListener('click', async function () { await sb.auth.signOut(); location.reload(); });
+
+  // ---------- lista de gravacoes ----------
+  async function carregarSessoes() {
+    var r = await sb.from('gravador_sessoes').select('*').order('criada_em', { ascending: false }).limit(30);
+    if (r.error) { $('msg-geral').textContent = 'Erro ao carregar: ' + r.error.message; return; }
+    sessoes = r.data;
+    var lista = $('lista-sessoes');
+    lista.textContent = '';
+    if (!sessoes.length) lista.appendChild(el('span', { classe: 'sub', texto: 'Nenhuma gravação criada ainda.' }));
+    sessoes.forEach(function (s) {
+      var b = el('button', { classe: 'sec' + (atual && atual.id === s.id ? ' atual' : ''), texto: s.titulo });
+      b.addEventListener('click', function () { escolher(s); });
+      lista.appendChild(b);
+    });
+  }
+
+  function escolher(s) {
+    atual = s; dados = null; ultimoSom = {}; apagarArmado = false;
+    $('btn-apagar').textContent = 'Apagar gravação e áudios';
+    $('msg-sessao').textContent = '';
+    $('c-sessao').classList.remove('oculto');
+    $('s-titulo').textContent = s.titulo;
+    $('s-link').textContent = new URL('./', location.href).href + '?s=' + s.codigo;
+    carregarSessoes();
+    atualizar();
+  }
+
+  $('btn-nova').addEventListener('click', async function () {
+    var titulo = $('novo-titulo').value.trim();
+    if (!titulo) { $('novo-titulo').focus(); return; }
+    var letras = 'abcdefghjkmnpqrstuvwxyz23456789', codigo = '';
+    var sorteio = crypto.getRandomValues(new Uint8Array(8));
+    for (var i = 0; i < 8; i++) codigo += letras[sorteio[i] % letras.length];
+    var r = await sb.from('gravador_sessoes').insert({ titulo: titulo, codigo: codigo, cancelar_eco: $('novo-eco').checked }).select().single();
+    if (r.error) { $('msg-geral').textContent = 'Não consegui criar: ' + r.error.message; return; }
+    $('novo-titulo').value = ''; $('novo-eco').checked = false; $('msg-geral').textContent = '';
+    escolher(r.data);
+  });
+
+  $('btn-copiar').addEventListener('click', async function () {
+    try { await navigator.clipboard.writeText($('s-link').textContent); $('btn-copiar').textContent = 'Copiado!'; }
+    catch (e) { $('btn-copiar').textContent = 'Selecione e copie'; }
+    setTimeout(function () { $('btn-copiar').textContent = 'Copiar link'; }, 1500);
+  });
+
+  // ---------- controle ----------
+  async function mudar(estado) {
+    if (!atual) return;
+    var r = await sb.rpc('gravador_mudar_estado', { p_sessao: atual.id, p_estado: estado });
+    if (r.error) $('msg-sessao').textContent = 'Erro: ' + r.error.message;
+    atualizar();
+  }
+  $('btn-iniciar').addEventListener('click', function () { mudar('gravando'); });
+  $('btn-encerrar').addEventListener('click', function () { mudar('encerrada'); });
+
+  $('btn-apagar').addEventListener('click', async function () {
+    if (!atual) return;
+    if (!apagarArmado) {
+      apagarArmado = true;
+      $('btn-apagar').textContent = 'Clique de novo para apagar de vez';
+      setTimeout(function () { apagarArmado = false; $('btn-apagar').textContent = 'Apagar gravação e áudios'; }, 5000);
+      return;
+    }
+    apagarArmado = false;
+    $('btn-apagar').disabled = true;
+    try {
+      var gente = (dados && dados.participantes) || [];
+      for (var i = 0; i < gente.length; i++) {
+        var pasta = atual.id + '/' + gente[i].id;
+        var nomes = await listar(pasta);
+        for (var j = 0; j < nomes.length; j += 100) {
+          var lote = nomes.slice(j, j + 100).map(function (n) { return pasta + '/' + n; });
+          var rr = await sb.storage.from(BALDE).remove(lote);
+          if (rr.error) throw rr.error;
+        }
+        $('msg-sessao').textContent = 'Apagando áudios... ' + (i + 1) + ' de ' + gente.length;
+      }
+      var d = await sb.from('gravador_sessoes').delete().eq('id', atual.id);
+      if (d.error) throw d.error;
+      atual = null; dados = null;
+      $('c-sessao').classList.add('oculto');
+      await carregarSessoes();
+    } catch (e) {
+      $('msg-sessao').textContent = 'Não consegui apagar tudo: ' + (e.message || e);
+    }
+    $('btn-apagar').disabled = false;
+    $('btn-apagar').textContent = 'Apagar gravação e áudios';
+  });
+
+  // ---------- acompanhamento ----------
+  async function atualizar() {
+    if (!atual || document.hidden) return;
+    var id = atual.id;
+    var r = await sb.rpc('gravador_painel', { p_sessao: id });
+    if (r.error || !atual || atual.id !== id || !r.data || !r.data.sessao) return;
+    dados = r.data;
+    desenhar();
+  }
+  document.addEventListener('visibilitychange', atualizar);
+
+  function desenhar() {
+    var s = dados.sessao, agora = new Date(dados.agora).getTime();
+    var nomes = { aguardando: 'Aguardando você iniciar', gravando: 'GRAVANDO', encerrada: 'Encerrada' };
+    $('s-estado').textContent = nomes[s.estado] || s.estado;
+    $('s-estado').style.color = s.estado === 'gravando' ? 'var(--rec)' : 'var(--sub)';
+    $('btn-iniciar').disabled = s.estado !== 'aguardando';
+    $('btn-encerrar').disabled = s.estado !== 'gravando';
+
+    var gente = dados.participantes;
+    $('vazio').classList.toggle('oculto', gente.length > 0);
+    var inicios = gente.filter(function (p) { return p.gravacao_iniciou_em; }).map(function (p) { return new Date(p.gravacao_iniciou_em).getTime(); });
+    var primeiro = inicios.length ? Math.min.apply(null, inicios) : null;
+
+    var corpo = $('corpo');
+    corpo.textContent = '';
+    gente.forEach(function (p) {
+      var semSinal = (agora - new Date(p.ultimo_sinal).getTime()) / 1000;
+      var situacao = p.status, texto;
+      if (p.status !== 'finalizado' && semSinal > 15) situacao = 'sumiu';
+      texto = {
+        pronto: 'Pronto, aguardando', gravando: 'Gravando', enviando: 'Enviando o final',
+        finalizado: 'Finalizado', erro: 'Com problema', sumiu: 'Sem sinal há ' + Math.round(semSinal) + 's'
+      }[situacao] || situacao;
+
+      var celSituacao = el('td', null, [el('span', { classe: 'selo s-' + situacao, texto: texto })]);
+      if (p.erro) celSituacao.appendChild(el('div', { classe: 'alerta', texto: p.erro }));
+
+      if (!ultimoSom[p.id] || p.nivel > 0.02) ultimoSom[p.id] = agora;
+      var barra = el('div'); barra.style.width = Math.min(100, Math.round(p.nivel * 160)) + '%';
+      var celSom = el('td', null, [el('div', { classe: 'medidor' }, [barra])]);
+      var mudo = (agora - ultimoSom[p.id]) / 1000;
+      if (situacao === 'gravando' && mudo > 30) celSom.appendChild(el('div', { classe: 'alerta', texto: 'sem som há ' + Math.round(mudo) + 's' }));
+
+      var partes = p.partes_enviadas + (p.partes_pendentes ? ' (+' + p.partes_pendentes + ' na fila)' : '');
+      var atraso = p.gravacao_iniciou_em ? new Date(p.gravacao_iniciou_em).getTime() - primeiro : null;
+      var inicioTxt = atraso === null ? '' : '+' + (atraso / 1000).toFixed(2).replace('.', ',') + 's';
+
+      var botao = el('button', { classe: 'sec', texto: baixando[p.id] || 'Baixar áudio' });
+      botao.disabled = !!baixando[p.id] || p.partes_enviadas === 0;
+      botao.addEventListener('click', function () { baixar(p, atraso || 0); });
+
+      corpo.appendChild(el('tr', null, [
+        el('td', { texto: p.nome }), celSituacao, celSom,
+        el('td', { texto: partes }), el('td', { texto: inicioTxt }),
+        el('td', { classe: 'sub', texto: p.microfone || '' }), el('td', null, [botao])
+      ]));
+    });
+  }
+
+  // ---------- download ----------
+  async function listar(pasta) {
+    var tudo = [], pos = 0;
+    for (;;) {
+      var r = await sb.storage.from(BALDE).list(pasta, { limit: 1000, offset: pos, sortBy: { column: 'name', order: 'asc' } });
+      if (r.error) throw r.error;
+      r.data.forEach(function (f) { tudo.push(f.name); });
+      if (r.data.length < 1000) break;
+      pos += 1000;
+    }
+    return tudo.sort();
+  }
+
+  async function baixarPartes(pasta, nomes, progresso) {
+    var partes = new Array(nomes.length), prox = 0, feitas = 0;
+    async function trabalhador() {
+      while (prox < nomes.length) {
+        var i = prox++, tentativa = 0;
+        for (;;) {
+          var r = await sb.storage.from(BALDE).download(pasta + '/' + nomes[i]);
+          if (!r.error) { partes[i] = r.data; break; }
+          if (++tentativa >= 4) throw new Error('falhou ao baixar a parte ' + nomes[i]);
+          await espera(800 * tentativa);
+        }
+        progresso(++feitas, nomes.length);
+      }
+    }
+    var turma = [];
+    for (var t = 0; t < 6; t++) turma.push(trabalhador());
+    await Promise.all(turma);
+    return partes;
+  }
+
+  async function baixar(p, atrasoMs) {
+    if (baixando[p.id]) return;
+    baixando[p.id] = 'Preparando...';
+    $('msg-sessao').textContent = '';
+    try {
+      var pasta = atual.id + '/' + p.id;
+      var nomes = await listar(pasta);
+      if (!nomes.length) throw new Error('nenhuma parte encontrada');
+      var faltando = [];
+      nomes.forEach(function (n, i) { if (parseInt(n, 10) !== i + 1 && !faltando.length) faltando.push(i + 1); });
+      var partes = await baixarPartes(pasta, nomes, function (f, total) { baixando[p.id] = 'Baixando ' + Math.round(f * 100 / total) + '%'; if (dados) desenhar(); });
+      var ext = nomes[0].split('.').pop();
+      var blob = new Blob(partes, { type: ext === 'webm' ? 'audio/webm' : 'application/octet-stream' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = limpo(atual.titulo) + '_' + limpo(p.nome) + '_inicio+' + Math.round(atrasoMs) + 'ms.' + ext;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+      if (faltando.length) $('msg-sessao').textContent = 'Atenção: o áudio de ' + p.nome + ' tem um buraco perto da parte ' + faltando[0] + '. Peça a cópia de segurança para essa pessoa.';
+    } catch (e) {
+      $('msg-sessao').textContent = 'Não consegui baixar o áudio de ' + p.nome + ': ' + (e.message || e);
+    }
+    delete baixando[p.id];
+    if (dados) desenhar();
+  }
+
+  conferirLogin();
+})();
+</script>
+</body>
+</html>
